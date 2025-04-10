@@ -61,6 +61,24 @@ def mk_header(api_token: str) -> dict[str, str]:
     return {'Authorization': f'Basic {credential}'}
 
 
+def mk_params(
+        default_params: dict, after_date: str|None, before_date: str|None
+    ) -> dict[str,str]:
+    """Assemple HTTP request parameters.
+
+      Args:
+        default_params: Values always used
+        after_date: Only get records created after this ISO-8601 date
+        before_date: Only get records created before this ISO-8601 date
+    """
+    params = default_params
+    if after_date is not None:
+        params.update({'created_after': after_date})
+    if before_date is not None:
+        params.update({'created_before': before_date})
+    return params
+
+
 def parse_link(link: str) -> list[tuple[str, str]]:
     "Parse link item from RFC-5988 response header, returning URIs and their relations"
     contents = []
@@ -163,8 +181,8 @@ class Application(Entity):
     # URL suffix identifying this entity in HTTP GET request
     rest_name = 'applications'
 
-    def __init__(self, job_data: dict, retrieval_timestamp: str):
-        self.data = job_data
+    def __init__(self, application_data: dict, retrieval_timestamp: str):
+        self.data = application_data
         super().__init__(retrieval_timestamp)
 
     def moniker(self) -> str:
@@ -178,8 +196,8 @@ class Candidate(Entity):
     # URL suffix identifying this entity in HTTP GET request
     rest_name = 'candidates'
 
-    def __init__(self, job_data: dict, retrieval_timestamp: str):
-        self.data = job_data
+    def __init__(self, candidate_data: dict, retrieval_timestamp: str):
+        self.data = candidate_data
         super().__init__(retrieval_timestamp)
 
     def moniker(self) -> str:
@@ -206,12 +224,26 @@ class Job(Entity):
         return self.data['name']
 
 
+class Offer(Entity):
+    # URL suffix identifying this entity in HTTP GET request
+    rest_name = 'offers'
+
+    def __init__(self, offer_data: dict, retrieval_timestamp: str):
+        self.data = offer_data
+        super().__init__(retrieval_timestamp)
+
+    def moniker(self) -> str:
+        candidate_id = self.data['candidate_id']
+        application_id = self.data['application_id']
+        return f'{candidate_id}/{application_id}'
+
+
 class Scorecard(Entity):
     # URL suffix identifying this entity in HTTP GET request
     rest_name = 'scorecards'
 
-    def __init__(self, job_data: dict, retrieval_timestamp: str):
-        self.data = job_data
+    def __init__(self, scorecard_data: dict, retrieval_timestamp: str):
+        self.data = scorecard_data
         super().__init__(retrieval_timestamp)
 
     def moniker(self) -> str:
@@ -250,6 +282,14 @@ def get_jobs_from_greenhouse(
     log.info('get_jobs_from_greenhouse')
     jobs, timestamp = get_entities_from_greenhouse(Job.rest_name, headers, params)
     return [Job(job_data, timestamp) for job_data in jobs]
+
+
+def get_offers_from_greenhouse(
+        headers: dict[str, str], params: dict[str,str]
+    ) -> list[Job]:
+    log.info('get_offers_from_greenhouse')
+    offers, timestamp = get_entities_from_greenhouse(Offer.rest_name, headers, params)
+    return [Offer(offer_data, timestamp) for offer_data in offers]
 
 
 def get_scorecards_from_greenhouse(
@@ -417,6 +457,8 @@ def check_references(cache_dir: Path) -> None:
     print(f'Candidates:   {len(candidate_index):5d}')
     job_index = read_index(cache_dir, Job.rest_name)
     print(f'Jobs:         {len(job_index):5d}')
+    offer_index = read_index(cache_dir, Offer.rest_name)
+    print(f'Offers:       {len(offer_index):5d}')
     scorecard_index = read_index(cache_dir, Scorecard.rest_name)
     print(f'Scorecards:   {len(scorecard_index):5d}')
     attachment_index = mk_attachment_index(cache_dir)
@@ -428,6 +470,7 @@ def check_references(cache_dir: Path) -> None:
 
     application_candidates = set()
     application_jobs = set()
+    all_applications = set(application_index.keys())
     for app_id, application_summary in application_index.items():
         # Application moniker is a portmanteau
         candidate_id, job_id = application_summary[1].split('/')
@@ -452,94 +495,83 @@ def check_references(cache_dir: Path) -> None:
     all_jobs = set(job_index.keys())
     jobs_without_applications = sorted(all_jobs - application_jobs)
     missing_jobs_from_applications = sorted(application_jobs - all_jobs)
+    offer_candidates = set()
+    offer_applications = set()
+    for offer_id, offer_summary in offer_index.items():
+        # Offer moniker is a portmanteau
+        candidate_id, application_id = offer_summary[1].split('/')
+        if len(candidate_id) > 0:
+            offer_candidates.add(candidate_id)
+        if len(application_id) > 0:
+            offer_applications.add(application_id)
+    missing_candidates_from_offers = sorted(offer_candidates - all_candidates)
+    missing_applications_from_offers = sorted(offer_applications - all_applications)
     print_category('Candidates without applications', candidates_without_applications)
     print_category('Missing candidates mentioned in applications', missing_candidates_from_applications)
     print_category('Jobs without applications', jobs_without_applications)
     print_category('Missing jobs mentioned in applications', missing_jobs_from_applications)
     print_category('Candidates without scorecards', candidates_without_scorecards)
     print_category('Missing candidates mentioned in scorecards', missing_candidates_from_scorecards)
+    print_category('Missing candidates mentioned in offers', missing_candidates_from_offers)
+    print_category('Missing applications mentioned in offers', missing_applications_from_offers)
 
 
-def mk_params(
-        default_params: dict, after_date: str|None, before_date: str|None
-    ) -> dict[str,str]:
-    """Assemple HTTP request parameters.
-
-      Args:
-        default_params: Values always used
-        after_date: Only get records created after this ISO-8601 date
-        before_date: Only get records created before this ISO-8601 date
-    """
-    params = default_params
-    if after_date is not None:
-        params.update({'created_after': after_date})
-    if before_date is not None:
-        params.update({'created_before': before_date})
-    return params
+def process_retrieved_entities(entities):
+    print(f"Total entities fetched: {len(entities)}")
+    for i, entity in enumerate(entities):
+        print(i, entity.data, entity.retrieval_timestamp)
+        print('----------------------')
+    save_entities(cache_dir, entities)
 
 
-def main():
-    headers = mk_header(API_TOKEN)
-    standard_params = {'per_page': 100}
-    # Set object creation date window to filter retrieved records:
-    #   after_date:   Only retrieve objects created after this date
-    #   before_date:  Only retrieve objects created before this date
-    after_date = '2023-10-01T00:00:00Z'
-    before_date = None
-    params = mk_params(standard_params, after_date, before_date)
-    log.info('Starting', cache_dir=str(cache_dir), params=params)
+class Commands:
+    """Greenhouse Data Extractor."""
 
-    # entrypoints = ['Jobs', 'Candidates', 'Candidate-attachments', 'Applications', 'Scorecards']
-    # entrypoints = ['Jobs']
-    # entrypoints = ['Candidates']
-    # entrypoints = ['Candidate-attachments']
-    # entrypoints = ['Applications']
-    # entrypoints = ['Scorecards']
-    entrypoints = ['reference-check']
+    def __init__(self, after_date=None, before_date=None):
+        """Assemble HTTP headers and request parameters.
 
-    if 'Applications' in entrypoints:
+          Args:
+            after_date: Only get records created after this ISO-8601 date
+            before_date: Only get records created before this ISO-8601 date
+        """
+        self.headers = mk_header(API_TOKEN)
+        standard_params = {'per_page': 100}
+        self.params = mk_params(standard_params, after_date, before_date)
+        log.info('Starting', cache_dir=str(cache_dir), params=self.params)
+
+    def applications(self):
         print("Fetching applications...")
-        entities = get_applications_from_greenhouse(headers, params)
-        print(f"Total entities fetched: {len(entities)}")
-        for i, entity in enumerate(entities):
-            print(i, entity.data, entity.retrieval_timestamp)
-            print('----------------------')
-        save_entities(cache_dir, entities)
+        entities = get_applications_from_greenhouse(self.headers, self.params)
+        process_retrieved_entities(entities)
 
-    if 'Candidates' in entrypoints:
-        print("Fetching candidates...")
-        entities = get_candidates_from_greenhouse(headers, params)
-        print(f"Total entities fetched: {len(entities)}")
-        for i, entity in enumerate(entities):
-            print(i, entity.data, entity.retrieval_timestamp)
-            print('----------------------')
-        save_entities(cache_dir, entities)
-
-    if 'Candidate-attachments' in entrypoints:
+    def attachments(self):
+        print("Fetching attachments for retrieved candidates...")
         get_candidate_attachments(cache_dir)
 
-    if 'Jobs' in entrypoints:
-        print("Fetching jobs...")
-        entities = get_jobs_from_greenhouse(headers, params)
-        print(f"Total entities fetched: {len(entities)}")
-        for i, entity in enumerate(entities):
-            print(i, entity.data, entity.retrieval_timestamp)
-            print('----------------------')
-        save_entities(cache_dir, entities)
+    def candidates(self):
+        print("Fetching candidates...")
+        entities = get_candidates_from_greenhouse(self.headers, self.params)
+        process_retrieved_entities(entities)
 
-    if 'Scorecards' in entrypoints:
-        print("Fetching scorecards...")
-        entities = get_scorecards_from_greenhouse(headers, params)
-        print(f"Total entities fetched: {len(entities)}")
-        for i, entity in enumerate(entities):
-            print(i, entity.data, entity.retrieval_timestamp)
-            print('----------------------')
-        save_entities(cache_dir, entities)
-
-    if 'reference-check' in entrypoints:
+    def check(self):
         print("Checking references...")
         check_references(cache_dir)
 
+    def jobs(self):
+        print("Fetching jobs...")
+        entities = get_jobs_from_greenhouse(self.headers, self.params)
+        process_retrieved_entities(entities)
+
+    def offers(self):
+        print("Fetching offers...")
+        entities = get_offers_from_greenhouse(self.headers, self.params)
+        process_retrieved_entities(entities)
+
+    def scorecards(self):
+        print("Fetching scorecards...")
+        entities = get_scorecards_from_greenhouse(self.headers, self.params)
+        process_retrieved_entities(entities)
+
 
 if __name__ == "__main__":
-    fire.Fire(main)
+    fire.Fire(Commands)
