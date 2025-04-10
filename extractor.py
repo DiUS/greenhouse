@@ -355,11 +355,11 @@ def save_entities(cache_dir: Path, entities: list[Entity]) -> None:
     write_index(cache_dir, rest_name, entity_summary)
 
 
-def mk_attachment_path(prefix_dir: Path, attachment: dict[str,str]) -> Path:
+def mk_attachment_path(prefix_dir: str, attachment: dict[str,str]) -> Path:
     attach_type = attachment['type']
     attach_timestamp = attachment['created_at']
     # Replace ':' character with 'c' in timestamp to ensure dir name is portable
-    return (prefix_dir /
+    return (Path(prefix_dir) /
         (attach_type + '-' + attach_timestamp.replace(':', 'c')))
 
 
@@ -415,12 +415,12 @@ def download_candidate_attachment(
     skip = attachment_filename.exists() and complete_filename.exists()
     log.info(
         'download_candidate_attachment', candidate_id=candidate_id,
-        filename=attach_filename, type=attach_type, skip=skip
+        filename=attachment_filename.name, type=attachment['type'], skip=skip
     )
     if not skip:
         complete_filename.unlink(True)
         attachment_filename.unlink(True)
-        response = requests.get(attach_url)
+        response = requests.get(attachment['url'])
         with attachment_filename.open(mode='wb') as af:
             af.write(response.content)
         with complete_filename.open(mode='w') as cf:
