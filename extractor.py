@@ -20,6 +20,7 @@ import csv
 import json
 import logging
 import os
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 import fire
@@ -314,20 +315,62 @@ def save_entities(cache_dir: Path, entities: list[Entity]) -> None:
     write_index(cache_dir, rest_name, entity_summary)
 
 
+def mk_attachment_path(prefix_dir: Path, attachment: dict[str,str]) -> Path:
+    attach_type = attachment['type']
+    attach_timestamp = attachment['created_at']
+    # Replace ':' character with 'c' in timestamp to ensure dir name is portable
+    return (prefix_dir /
+        (attach_type + '-' + attach_timestamp.replace(':', 'c')))
+
+
+def mk_attachment_index(cache_dir: Path) -> dict[str,list[tuple]]:
+    """Create index of all candidate attachments.
+
+      Returns a mapping candidate_id -> list of tuples, each with attributes of
+      one attachment associated with that candidate.
+    """
+    entity_dir = cache_dir / Candidate.rest_name
+    attachment_index = defaultdict(list)
+    for attachment_dir in entity_dir.glob('*-attachments'):
+        candidate_id = attachment_dir.name.split('-')[0]
+        for at_subdir in attachment_dir.iterdir():
+            parts = at_subdir.name.split('-', 1)
+            attachment_type = parts[0]
+            attachment_date = parts[1].replace('c', ':')
+            attachment_filename = None
+            complete = False
+            for f in at_subdir.iterdir():
+                if f.name == 'complete':
+                    complete = True
+                else:
+                    attachment_filename = str(f)
+            attachment_index[candidate_id].append(
+                (attachment_type, attachment_date, attachment_filename, complete)
+            )
+    return attachment_index
+
+
+def candidate_attachment_exists(
+        cache_dir: Path, candidate_id: str, attachment: dict[str,str]
+    ) -> bool:
+    # Duplication of code in download_candidate_attachment()
+    entity_dir = cache_dir / Candidate.rest_name
+    attachment_dir = (entity_dir 
+        / mk_attachment_path(candidate_id + '-attachments', attachment))
+    attachment_filename = attachment_dir / attachment['filename']
+    complete_filename = attachment_dir / 'complete'
+    return attachment_filename.exists() and complete_filename.exists()
+
+
 def download_candidate_attachment(
         cache_dir: Path, candidate_id: str, attachment: dict[str,str]
     ) -> None:
     "Download and save attachment file to cache."
     entity_dir = cache_dir / Candidate.rest_name
-    attach_type = attachment['type']
-    attach_filename = attachment['filename']
-    attach_url = attachment['url']
-    attach_timestamp = attachment['created_at']
-    # Replace ':' character with 'c' in timestamp to ensure dir name is portable
-    attachment_dir = (entity_dir / (candidate_id + '-attachments')
-                    / (attach_type + '-' + attach_timestamp.replace(':', 'c')))
+    attachment_dir = (entity_dir 
+        / mk_attachment_path(candidate_id + '-attachments', attachment))
     attachment_dir.mkdir(parents=True, exist_ok=True)
-    attachment_filename = attachment_dir / attach_filename
+    attachment_filename = attachment_dir / attachment['filename']
     complete_filename = attachment_dir / 'complete'
     skip = attachment_filename.exists() and complete_filename.exists()
     log.info(
@@ -340,8 +383,8 @@ def download_candidate_attachment(
         response = requests.get(attach_url)
         with attachment_filename.open(mode='wb') as af:
             af.write(response.content)
-    with complete_filename.open(mode='w') as cf:
-        cf.write('')
+        with complete_filename.open(mode='w') as cf:
+            cf.write('')
 
 
 def get_candidate_attachments(cache_dir: Path) -> None:
@@ -357,6 +400,64 @@ def get_candidate_attachments(cache_dir: Path) -> None:
                 download_candidate_attachment(cache_dir, v[0], attach)
                 i += 1
     log.info('get_candidate_attachments', number=i)
+
+
+def print_category(category_title: str, members: list[str]) -> None:
+    member_limit = 25
+    print(f'{category_title}: {len(members)}')
+    if 0 < len(members) <= member_limit:
+        for member_id in members:
+            print('   ', member_id)
+
+
+def check_references(cache_dir: Path) -> None:
+    application_index = read_index(cache_dir, Application.rest_name)
+    print(f'Applications: {len(application_index):5d}')
+    candidate_index = read_index(cache_dir, Candidate.rest_name)
+    print(f'Candidates:   {len(candidate_index):5d}')
+    job_index = read_index(cache_dir, Job.rest_name)
+    print(f'Jobs:         {len(job_index):5d}')
+    scorecard_index = read_index(cache_dir, Scorecard.rest_name)
+    print(f'Scorecards:   {len(scorecard_index):5d}')
+    attachment_index = mk_attachment_index(cache_dir)
+    n_attachments = sum([
+        len(candidate_attachments)
+        for candidate_attachments in attachment_index.values()
+    ])
+    print(f'Attachments:  {n_attachments:5d}')
+
+    application_candidates = set()
+    application_jobs = set()
+    for app_id, application_summary in application_index.items():
+        # Application moniker is a portmanteau
+        candidate_id, job_id = application_summary[1].split('/')
+        if len(candidate_id) > 0:
+            application_candidates.add(candidate_id)
+        if len(job_id) > 0:
+            application_jobs.add(job_id)
+    all_candidates = set(candidate_index.keys())
+    candidates_without_applications = sorted(
+        all_candidates - application_candidates
+    )
+    missing_candidates_from_applications = sorted(
+        application_candidates - all_candidates
+    )
+    scorecard_candidates = set()
+    for scorecard_id, scorecard_summary in scorecard_index.items():
+        candidate_id = scorecard_summary[1]
+        if len(candidate_id) > 0:
+            scorecard_candidates.add(candidate_id)
+    candidates_without_scorecards = sorted(all_candidates - scorecard_candidates)
+    missing_candidates_from_scorecards = sorted(scorecard_candidates - all_candidates)
+    all_jobs = set(job_index.keys())
+    jobs_without_applications = sorted(all_jobs - application_jobs)
+    missing_jobs_from_applications = sorted(application_jobs - all_jobs)
+    print_category('Candidates without applications', candidates_without_applications)
+    print_category('Missing candidates mentioned in applications', missing_candidates_from_applications)
+    print_category('Jobs without applications', jobs_without_applications)
+    print_category('Missing jobs mentioned in applications', missing_jobs_from_applications)
+    print_category('Candidates without scorecards', candidates_without_scorecards)
+    print_category('Missing candidates mentioned in scorecards', missing_candidates_from_scorecards)
 
 
 def mk_params(
@@ -393,7 +494,8 @@ def main():
     # entrypoints = ['Candidates']
     # entrypoints = ['Candidate-attachments']
     # entrypoints = ['Applications']
-    entrypoints = ['Scorecards']
+    # entrypoints = ['Scorecards']
+    entrypoints = ['reference-check']
 
     if 'Applications' in entrypoints:
         print("Fetching applications...")
@@ -433,6 +535,10 @@ def main():
             print(i, entity.data, entity.retrieval_timestamp)
             print('----------------------')
         save_entities(cache_dir, entities)
+
+    if 'reference-check' in entrypoints:
+        print("Checking references...")
+        check_references(cache_dir)
 
 
 if __name__ == "__main__":
