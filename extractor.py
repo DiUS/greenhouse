@@ -355,6 +355,26 @@ def save_entities(cache_dir: Path, entities: list[Entity]) -> None:
     write_index(cache_dir, rest_name, entity_summary)
 
 
+def get_candidate_activity_feeds(
+        cache_dir: Path, headers: dict[str, str], params: dict[str,str]
+    ) -> None:
+    "Get activity feeds for cached candidates."
+    entity_summary = read_index(cache_dir, Candidate.rest_name)
+    entity_dir = cache_dir / Candidate.rest_name
+    for candidate_id in entity_summary:
+        file_name = entity_dir / f'{candidate_id}-activity_feed.json'
+        skip = file_name.exists()
+        log.info('get_candidate_activity_feeds', candidate_id=candidate_id, skip=skip)
+        if not skip:
+            try:
+                rest_name = Candidate.rest_name + f'/{candidate_id}/activity_feed'
+                feed = get_paginated(rest_name, headers, params)
+                with file_name.open('w') as ff:
+                    json.dump(feed, ff)
+            except ValueError:
+                pass
+
+
 def mk_attachment_path(prefix_dir: str, attachment: dict[str,str]) -> Path:
     attach_type = attachment['type']
     attach_timestamp = attachment['created_at']
@@ -538,6 +558,10 @@ class Commands:
         standard_params = {'per_page': 100}
         self.params = mk_params(standard_params, after_date, before_date)
         log.info('Starting', cache_dir=str(cache_dir), params=self.params)
+
+    def activity_feeds(self):
+        print("Fetching activity feeds...")
+        get_candidate_activity_feeds(cache_dir, self.headers, self.params)
 
     def applications(self):
         print("Fetching applications...")
