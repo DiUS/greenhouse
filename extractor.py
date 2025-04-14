@@ -238,6 +238,20 @@ class Offer(Entity):
         return f'{candidate_id}/{application_id}'
 
 
+class Pool(Entity):
+    # URL suffix identifying this entity in HTTP GET request
+    rest_name = 'prospect_pools'
+
+    def __init__(
+            self, application_data: dict, retrieval_timestamp: str
+        ):
+        self.data = application_data
+        super().__init__(retrieval_timestamp)
+
+    def moniker(self) -> str:
+        return self.data['name']
+
+
 class Scorecard(Entity):
     # URL suffix identifying this entity in HTTP GET request
     rest_name = 'scorecards'
@@ -290,6 +304,14 @@ def get_offers_from_greenhouse(
     log.info('get_offers_from_greenhouse')
     offers, timestamp = get_entities_from_greenhouse(Offer.rest_name, headers, params)
     return [Offer(offer_data, timestamp) for offer_data in offers]
+
+
+def get_pools_from_greenhouse(
+        headers: dict[str, str], params: dict[str,str]
+    ) -> list[Job]:
+    log.info('get_pools_from_greenhouse')
+    pools, timestamp = get_entities_from_greenhouse(Pool.rest_name, headers, params)
+    return [Pool(pool_data, timestamp) for pool_data in pools]
 
 
 def get_scorecards_from_greenhouse(
@@ -498,6 +520,7 @@ def check_references(cache_dir: Path) -> None:
             application_candidates.add(candidate_id)
         if len(job_id) > 0:
             application_jobs.add(job_id)
+    assert len(application_candidates) > 0
     all_candidates = set(candidate_index.keys())
     candidates_without_applications = sorted(
         all_candidates - application_candidates
@@ -510,6 +533,7 @@ def check_references(cache_dir: Path) -> None:
         candidate_id = scorecard_summary[1]
         if len(candidate_id) > 0:
             scorecard_candidates.add(candidate_id)
+    assert len(scorecard_candidates) > 0
     candidates_without_scorecards = sorted(all_candidates - scorecard_candidates)
     missing_candidates_from_scorecards = sorted(scorecard_candidates - all_candidates)
     all_jobs = set(job_index.keys())
@@ -524,6 +548,7 @@ def check_references(cache_dir: Path) -> None:
             offer_candidates.add(candidate_id)
         if len(application_id) > 0:
             offer_applications.add(application_id)
+    assert len(offer_candidates) > 0
     missing_candidates_from_offers = sorted(offer_candidates - all_candidates)
     missing_applications_from_offers = sorted(offer_applications - all_applications)
     print_category('Candidates without applications', candidates_without_applications)
@@ -589,6 +614,11 @@ class Commands:
     def offers(self):
         print("Fetching offers...")
         entities = get_offers_from_greenhouse(self.headers, self.params)
+        process_retrieved_entities(entities)
+
+    def pools(self):
+        print("Fetching prospect pools...")
+        entities = get_pools_from_greenhouse(self.headers, self.params)
         process_retrieved_entities(entities)
 
     def scorecards(self):
