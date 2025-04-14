@@ -264,6 +264,18 @@ class Scorecard(Entity):
         return str(self.data['candidate_id'])
 
 
+class Source(Entity):
+    # URL suffix identifying this entity in HTTP GET request
+    rest_name = 'sources'
+
+    def __init__(self, source_data: dict, retrieval_timestamp: str):
+        self.data = source_data
+        super().__init__(retrieval_timestamp)
+
+    def moniker(self) -> str:
+        return self.data['name']
+
+
 def get_entities_from_greenhouse(
         rest_name: str, headers: dict[str, str], params: dict[str,str]
     ) -> tuple[list[Entity], str]:
@@ -276,7 +288,7 @@ def get_entities_from_greenhouse(
 
 def get_applications_from_greenhouse(
         headers: dict[str, str], params: dict[str,str]
-    ) -> list[Job]:
+    ) -> list[Application]:
     log.info('get_applications_from_greenhouse')
     applications, timestamp = get_entities_from_greenhouse(Application.rest_name, headers, params)
     return [Application(application_data, timestamp) for application_data in applications]
@@ -284,7 +296,7 @@ def get_applications_from_greenhouse(
 
 def get_candidates_from_greenhouse(
         headers: dict[str, str], params: dict[str,str]
-    ) -> list[Job]:
+    ) -> list[Candidate]:
     log.info('get_candidates_from_greenhouse')
     candidates, timestamp = get_entities_from_greenhouse(Candidate.rest_name, headers, params)
     return [Candidate(candidate_data, timestamp) for candidate_data in candidates]
@@ -300,7 +312,7 @@ def get_jobs_from_greenhouse(
 
 def get_offers_from_greenhouse(
         headers: dict[str, str], params: dict[str,str]
-    ) -> list[Job]:
+    ) -> list[Offer]:
     log.info('get_offers_from_greenhouse')
     offers, timestamp = get_entities_from_greenhouse(Offer.rest_name, headers, params)
     return [Offer(offer_data, timestamp) for offer_data in offers]
@@ -316,10 +328,18 @@ def get_pools_from_greenhouse(
 
 def get_scorecards_from_greenhouse(
         headers: dict[str, str], params: dict[str,str]
-    ) -> list[Job]:
+    ) -> list[Pool]:
     log.info('get_scorecards_from_greenhouse')
     scorecards, timestamp = get_entities_from_greenhouse(Scorecard.rest_name, headers, params)
     return [Scorecard(scorecard_data, timestamp) for scorecard_data in scorecards]
+
+
+def get_sources_from_greenhouse(
+        headers: dict[str, str], params: dict[str,str]
+    ) -> list[Source]:
+    log.info('get_sources_from_greenhouse')
+    sources, timestamp = get_entities_from_greenhouse(Source.rest_name, headers, params)
+    return [Source(source_data, timestamp) for source_data in sources]
 
 
 def read_index(cache_dir: Path, rest_name: str) -> dict[str, tuple]:
@@ -500,6 +520,7 @@ def get_indices(cache_dir: Path) -> dict[str,tuple]:
         'offer':       read_index(cache_dir, Offer.rest_name),
         'pool':        read_index(cache_dir, Pool.rest_name),
         'scorecard':   read_index(cache_dir, Scorecard.rest_name),
+        'source':      read_index(cache_dir, Source.rest_name),
         'attachment':  mk_attachment_index(cache_dir)
     }
 
@@ -512,6 +533,7 @@ def print_stats(cache_dir: Path) -> None:
     offer_index = idx['offer']
     pool_index = idx['pool']
     scorecard_index = idx['scorecard']
+    source_index = idx['source']
     attachment_index = idx['attachment']
     n_attachments = sum([
         len(candidate_attachments)
@@ -523,6 +545,7 @@ def print_stats(cache_dir: Path) -> None:
     print(f'Offers:       {len(offer_index):5d}')
     print(f'Pools:        {len(pool_index):5d}')
     print(f'Scorecards:   {len(scorecard_index):5d}')
+    print(f'Sources:      {len(source_index):5d}')
     print(f'Attachments:  {n_attachments:5d}')
 
 
@@ -642,6 +665,11 @@ class Commands:
     def scorecards(self):
         print("Fetching scorecards...")
         entities = get_scorecards_from_greenhouse(self.headers, self.params)
+        process_retrieved_entities(entities)
+
+    def sources(self):
+        print("Fetching sources...")
+        entities = get_sources_from_greenhouse(self.headers, self.params)
         process_retrieved_entities(entities)
 
     def stats(self):

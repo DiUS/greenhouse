@@ -23,6 +23,13 @@ Entity retrieval commands:
 - offers
 - prospect_pools
 - scorecards
+- sources
+
+e.g. To extract all candidate records created after 1st November 2022:
+
+```
+  python extractor.py candidates -a 2022-11-01
+```
 
 Some commands use the candidate records already extracted into the cache.
 These should be run after all required candidates have been extracted.
@@ -51,6 +58,7 @@ The hierarchy is:
     ├── offers             <- All the offers.
     ├── prospect_pools     <- All the prospect pools.
     ├── scorecards         <- All the scorecards.
+    ├── sources            <- All the sources.
 
 ### Attachments
 
