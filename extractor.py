@@ -492,28 +492,46 @@ def print_category(category_title: str, members: list[str]) -> None:
             print('   ', member_id)
 
 
-def check_references(cache_dir: Path) -> None:
-    application_index = read_index(cache_dir, Application.rest_name)
-    print(f'Applications: {len(application_index):5d}')
-    candidate_index = read_index(cache_dir, Candidate.rest_name)
-    print(f'Candidates:   {len(candidate_index):5d}')
-    job_index = read_index(cache_dir, Job.rest_name)
-    print(f'Jobs:         {len(job_index):5d}')
-    offer_index = read_index(cache_dir, Offer.rest_name)
-    print(f'Offers:       {len(offer_index):5d}')
-    scorecard_index = read_index(cache_dir, Scorecard.rest_name)
-    print(f'Scorecards:   {len(scorecard_index):5d}')
-    attachment_index = mk_attachment_index(cache_dir)
+def get_indices(cache_dir: Path) -> dict[str,tuple]:
+    return {
+        'application': read_index(cache_dir, Application.rest_name),
+        'candidate':   read_index(cache_dir, Candidate.rest_name),
+        'job':         read_index(cache_dir, Job.rest_name),
+        'offer':       read_index(cache_dir, Offer.rest_name),
+        'pool':        read_index(cache_dir, Pool.rest_name),
+        'scorecard':   read_index(cache_dir, Scorecard.rest_name),
+        'attachment':  mk_attachment_index(cache_dir)
+    }
+
+
+def print_stats(cache_dir: Path) -> None:
+    idx = get_indices(cache_dir)
+    application_index = idx['application']
+    candidate_index = idx['candidate']
+    job_index = idx['job']
+    offer_index = idx['offer']
+    pool_index = idx['pool']
+    scorecard_index = idx['scorecard']
+    attachment_index = idx['attachment']
     n_attachments = sum([
         len(candidate_attachments)
         for candidate_attachments in attachment_index.values()
     ])
+    print(f'Applications: {len(application_index):5d}')
+    print(f'Candidates:   {len(candidate_index):5d}')
+    print(f'Jobs:         {len(job_index):5d}')
+    print(f'Offers:       {len(offer_index):5d}')
+    print(f'Pools:        {len(pool_index):5d}')
+    print(f'Scorecards:   {len(scorecard_index):5d}')
     print(f'Attachments:  {n_attachments:5d}')
 
+
+def check_references(cache_dir: Path) -> None:
+    idx = get_indices(cache_dir)
     application_candidates = set()
     application_jobs = set()
-    all_applications = set(application_index.keys())
-    for app_id, application_summary in application_index.items():
+    all_applications = set(idx['application'].keys())
+    for app_id, application_summary in idx['application'].items():
         # Application moniker is a portmanteau
         candidate_id, job_id = application_summary[1].split('/')
         if len(candidate_id) > 0:
@@ -521,7 +539,7 @@ def check_references(cache_dir: Path) -> None:
         if len(job_id) > 0:
             application_jobs.add(job_id)
     assert len(application_candidates) > 0
-    all_candidates = set(candidate_index.keys())
+    all_candidates = set(idx['candidate'].keys())
     candidates_without_applications = sorted(
         all_candidates - application_candidates
     )
@@ -529,19 +547,19 @@ def check_references(cache_dir: Path) -> None:
         application_candidates - all_candidates
     )
     scorecard_candidates = set()
-    for scorecard_id, scorecard_summary in scorecard_index.items():
+    for scorecard_id, scorecard_summary in idx['scorecard'].items():
         candidate_id = scorecard_summary[1]
         if len(candidate_id) > 0:
             scorecard_candidates.add(candidate_id)
     assert len(scorecard_candidates) > 0
     candidates_without_scorecards = sorted(all_candidates - scorecard_candidates)
     missing_candidates_from_scorecards = sorted(scorecard_candidates - all_candidates)
-    all_jobs = set(job_index.keys())
+    all_jobs = set(idx['job'].keys())
     jobs_without_applications = sorted(all_jobs - application_jobs)
     missing_jobs_from_applications = sorted(application_jobs - all_jobs)
     offer_candidates = set()
     offer_applications = set()
-    for offer_id, offer_summary in offer_index.items():
+    for offer_id, offer_summary in idx['offer'].items():
         # Offer moniker is a portmanteau
         candidate_id, application_id = offer_summary[1].split('/')
         if len(candidate_id) > 0:
@@ -625,6 +643,10 @@ class Commands:
         print("Fetching scorecards...")
         entities = get_scorecards_from_greenhouse(self.headers, self.params)
         process_retrieved_entities(entities)
+
+    def stats(self):
+        print("Counting records...")
+        print_stats(cache_dir)
 
 
 if __name__ == "__main__":
